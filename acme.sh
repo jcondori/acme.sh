@@ -6,7 +6,10 @@ PROJECT_NAME="acme.sh"
 
 PROJECT_ENTRY="acme.sh"
 
-PROJECT="https://github.com/acmesh-official/$PROJECT_NAME"
+# Personal fork: --install-online, --upgrade and the auto upgrade download from
+# here, so they keep the dns_gd changes instead of reverting to the official
+# release.
+PROJECT="https://github.com/jcondori/$PROJECT_NAME"
 
 DEFAULT_INSTALL_HOME="$HOME/.$PROJECT_NAME"
 
@@ -8545,7 +8548,7 @@ installOnline() {
 _getRepoHash() {
   _hash_path=$1
   shift
-  _hash_url="${PROJECT_API:-https://api.github.com/repos/acmesh-official}/$PROJECT_NAME/git/refs/$_hash_path"
+  _hash_url="${PROJECT_API:-https://api.github.com/repos/jcondori}/$PROJECT_NAME/git/refs/$_hash_path"
   _get "$_hash_url" "" 30 | tr -d "\r\n" | tr '{},' '\n\n\n' | grep '"sha":' | cut -d '"' -f 4
 }
 

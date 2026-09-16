@@ -180,18 +180,20 @@
 
 ### 1️⃣ How to Install
 
+> ⚠️ **Fork personal (`jcondori/acme.sh`).** Esta versión agrega a `dns_gd` el soporte de
+> GoDaddy Personal Access Tokens (`GD_Token`), guardados por certificado. **No uses
+> `get.acme.sh`**: instala la versión oficial, sin estos cambios. Usa los comandos de abajo.
+
 #### 📥 Install Online
 
-> Check this project: https://github.com/acmesh-official/get.acme.sh
-
 ```bash
-curl https://get.acme.sh | sh -s email=my@example.com
+curl -L https://raw.githubusercontent.com/jcondori/acme.sh/master/acme.sh | sh -s -- --install-online -m my@example.com
 ```
 
 **Or:**
 
 ```bash
-wget -O -  https://get.acme.sh | sh -s email=my@example.com
+wget -O - https://raw.githubusercontent.com/jcondori/acme.sh/master/acme.sh | sh -s -- --install-online -m my@example.com
 ```
 
 #### 📦 Install from Git
@@ -199,7 +201,7 @@ wget -O -  https://get.acme.sh | sh -s email=my@example.com
 Clone this project and launch installation:
 
 ```bash
-git clone https://github.com/acmesh-official/acme.sh.git
+git clone https://github.com/jcondori/acme.sh.git
 cd ./acme.sh
 ./acme.sh --install -m my@example.com
 ```
@@ -207,6 +209,69 @@ cd ./acme.sh
 > 💡 You `don't have to be root` then, although `it is recommended`.
 
 📚 **Advanced Installation:** https://github.com/acmesh-official/acme.sh/wiki/How-to-install
+
+#### 🔁 Servidor que ya tiene el acme.sh oficial
+
+Instala encima, con el mismo usuario con el que se instaló (normalmente root). Se reemplazan los
+scripts de `~/.acme.sh/` y se mantienen los certificados, `account.conf` y el cron. Si lo instalaste
+con `--home` o `--config-home`, agrega las mismas opciones al final del comando.
+
+```bash
+curl -L https://raw.githubusercontent.com/jcondori/acme.sh/master/acme.sh | sh -s -- --install-online
+```
+
+> ⚠️ `acme.sh --upgrade` no sirve para pasar al fork: el script oficial se actualiza desde el
+> repositorio oficial.
+
+Comprueba que quedó instalado el fork:
+
+```bash
+grep '^PROJECT=' ~/.acme.sh/acme.sh
+grep -c _gd_detect_root ~/.acme.sh/dnsapi/dns_gd.sh
+```
+
+La primera línea debe contener `jcondori`, y la segunda mostrar un número mayor que 0.
+
+#### 🔑 GoDaddy con un token por dominio
+
+Emite cada certificado con el token de su dominio. El token se guarda en la conf del
+certificado, y las renovaciones del cron lo leen de ahí:
+
+```bash
+export GD_Token="token_de_a_com"
+acme.sh --issue --dns dns_gd -d a.com -d '*.a.com'
+
+export GD_Token="token_de_b_com"
+acme.sh --issue --dns dns_gd -d b.com -d '*.b.com'
+
+unset GD_Token
+```
+
+- El token necesita los scopes `domains.dns:update` y `domains.domain:read`.
+- Un certificado no puede mezclar dominios de tokens distintos: emite un certificado por token.
+- Si queda exportado un token que no sirve para el dominio, se usa el token guardado del certificado y no se sobrescribe.
+- Para cambiar el token de un certificado, emite o renueva con el nuevo exportado (`--renew -d a.com --force`).
+- Ubicación de la conf: `acme.sh --info -d a.com` muestra `DOMAIN_CONF=...` (normalmente `~/.acme.sh/a.com_ecc/a.com.conf`).
+
+**Si usaste la versión anterior de este fork**, el token quedó en `account.conf` como
+`SAVED_GD_Token` y esta versión ya no lo lee: la renovación fallaría. Muévelo a la conf del certificado:
+
+```bash
+grep '^SAVED_GD_Token=' ~/.acme.sh/account.conf
+echo "GD_Token='el_token'" >> ~/.acme.sh/a.com_ecc/a.com.conf
+sed -i '/^SAVED_GD_Token=/d' ~/.acme.sh/account.conf
+```
+
+#### ⬆️ Actualizar
+
+`acme.sh --upgrade` descarga `master` de este fork, no del oficial. Actualiza la rama del fork antes
+(botón *Sync fork* en GitHub, o `git fetch upstream && git merge upstream/master`) para recibir las
+novedades del oficial. Revisa los conflictos en `acme.sh` (`PROJECT` y `_getRepoHash`) y en
+`dnsapi/dns_gd.sh`.
+
+> ⚠️ Con `--auto-upgrade`, el cron de cada servidor instala lo que haya en `master` del fork al
+> día siguiente. Déjalo desactivado (`acme.sh --upgrade --auto-upgrade 0`) y actualiza a mano,
+> después de probar.
 
 **The installer will perform 3 actions:**
 
