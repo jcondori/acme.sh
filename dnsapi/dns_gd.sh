@@ -4,7 +4,7 @@ dns_gd_info='GoDaddy.com
 Site: GoDaddy.com
 Docs: github.com/acmesh-official/acme.sh/wiki/dnsapi#dns_gd
 Options:
- GD_Token Personal Access Token (PAT) with the "domains.dns:update" and "domains.domain:read" scopes
+ GD_Token Personal Access Token (PAT) with the "domains.dns:update" and "domains.domain:read" scopes. Saved per certificate, so each certificate can use its own token.
 OptionsAlt:
  GD_Key API Key (classic, deprecated by GoDaddy)
  GD_Secret API Secret (classic, deprecated by GoDaddy)
@@ -27,19 +27,8 @@ dns_gd_add() {
     return 1
   fi
 
-  #save the credentials to the account conf file.
-  if [ "$_gd_auth" = "token" ]; then
-    _saveaccountconf_mutable GD_Token "$GD_Token"
-    _clearaccountconf_mutable GD_Key
-    _clearaccountconf_mutable GD_Secret
-  else
-    _saveaccountconf_mutable GD_Key "$GD_Key"
-    _saveaccountconf_mutable GD_Secret "$GD_Secret"
-    _clearaccountconf_mutable GD_Token
-  fi
-
   _debug "First detect the root zone"
-  if ! _get_root "$fulldomain"; then
+  if ! _gd_detect_root "$fulldomain"; then
     _err "invalid domain"
     return 1
   fi
@@ -47,9 +36,20 @@ dns_gd_add() {
   _debug _sub_domain "$_sub_domain"
   _debug _domain "$_domain"
 
+  # Save the credentials only now that they have proven to reach the zone, so a
+  # wrong token never replaces the one that works for this certificate.
   if [ "$_gd_auth" = "token" ]; then
+    #save the token to the domain conf file, so each certificate keeps its own token.
+    _savedomainconf GD_Token "$GD_Token"
     _gd_v3_add
     return $?
+  fi
+
+  #save the api key and secret to the account conf file.
+  _saveaccountconf_mutable GD_Key "$GD_Key"
+  _saveaccountconf_mutable GD_Secret "$GD_Secret"
+  if [ "$_gd_saved_token" ]; then
+    _cleardomainconf GD_Token
   fi
 
   _debug "Getting existing records"
@@ -110,7 +110,7 @@ dns_gd_rm() {
   fi
 
   _debug "First detect the root zone"
-  if ! _get_root "$fulldomain"; then
+  if ! _gd_detect_root "$fulldomain"; then
     _err "invalid domain"
     return 1
   fi
@@ -163,14 +163,18 @@ dns_gd_rm() {
 
 ####################  Private functions below ##################################
 
-# Loads the credentials from the environment or the account conf file.
-# A Personal Access Token (GD_Token) takes precedence over the classic
-# GD_Key/GD_Secret pair, unless the pair was given explicitly in the environment.
-# sets _gd_auth to "token" or "key"
+# Loads the credentials from the environment, the domain conf file or the
+# account conf file. The Personal Access Token (GD_Token) is kept in the domain
+# conf file, so certificates for domains of different tokens do not overwrite
+# each other's. A token takes precedence over the classic GD_Key/GD_Secret pair,
+# unless the pair was given explicitly in the environment.
+# sets _gd_auth to "token" or "key", and _gd_saved_token to the token saved for
+# this certificate
 _gd_load_credentials() {
+  _gd_saved_token="$(_readdomainconf GD_Token)"
   if [ -z "$GD_Token" ]; then
     if [ -z "$GD_Key" ] && [ -z "$GD_Secret" ]; then
-      GD_Token="$(_readaccountconf_mutable GD_Token)"
+      GD_Token="$_gd_saved_token"
     fi
     if [ -z "$GD_Token" ]; then
       GD_Key="${GD_Key:-$(_readaccountconf_mutable GD_Key)}"
@@ -275,6 +279,28 @@ _gd_v3_get_records() {
     return 1
   fi
   return 0
+}
+
+# Detects the root zone like _get_root. When the token from the environment
+# cannot reach the zone and another token is saved for this certificate, retries
+# with the saved one: a token exported in the shell for a different domain must
+# not break the renewal of this certificate.
+_gd_detect_root() {
+  if [ "$_gd_auth" != "token" ] || [ -z "$_gd_saved_token" ] || [ "$GD_Token" = "$_gd_saved_token" ]; then
+    _get_root "$1"
+    return $?
+  fi
+
+  _gd_quiet_auth_err=1
+  if _get_root "$1"; then
+    _gd_quiet_auth_err=""
+    return 0
+  fi
+  _gd_quiet_auth_err=""
+
+  _info "The GD_Token from the environment cannot reach the zone of '$1', retrying with the token saved for this certificate."
+  GD_Token="$_gd_saved_token"
+  _get_root "$1"
 }
 
 #_acme-challenge.www.domain.com
@@ -383,8 +409,11 @@ _gd_rest() {
   if [ "$_gd_auth" = "token" ] && [ "$_gd_code" = "401" ]; then
     # A token missing a scope is rejected by the GoDaddy gateway with an empty
     # 401 body, not with the 403 their docs mention, so mention the scopes here.
-    _err "It seems that your GoDaddy Personal Access Token is not correct, has expired or lacks the \"domains.dns:update\" and \"domains.domain:read\" scopes."
-    _err "Note that a freshly created token needs up to a minute before it is accepted."
+    # _gd_detect_root silences it while another token is still left to try.
+    if [ -z "$_gd_quiet_auth_err" ]; then
+      _err "It seems that your GoDaddy Personal Access Token is not correct, has expired or lacks the \"domains.dns:update\" and \"domains.domain:read\" scopes."
+      _err "Note that a freshly created token needs up to a minute before it is accepted."
+    fi
     return 1
   fi
   return 0
